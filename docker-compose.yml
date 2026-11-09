@@ -1,0 +1,18 @@
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: myos-n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - TZ=Asia/Kolkata
+      - GENERIC_TIMEZONE=Asia/Kolkata
+      - N8N_WEBHOOK_URL=https://smith-elk-perch.ngrok-free.dev
+      - N8N_PROXY_HOPS=1
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+volumes:
+  n8n_data:

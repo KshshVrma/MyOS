@@ -1,0 +1,401 @@
+{
+  "name": "MyOS - Local AI Test",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f74d08c0-c50b-4aff-b1de-4fdb7a83ace0",
+      "name": "When chat message received",
+      "webhookId": "04d7a2d3-7343-43ef-a53f-a1a368764514"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput || $json.message?.text }}",
+        "hasOutputParser": true,
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=You are MyOS, a personal assistant.\n\nCurrent date: {{ $now.setZone('Asia/Kolkata').toFormat('yyyy-MM-dd') }}\nTimezone: Asia/Kolkata\n\nIdentify the user's intent:\nCREATE_TASK, CREATE_REMINDER, ASK_QUESTION, GENERAL_CHAT.\n\nExtract:\n- intent\n- description\n- date (YYYY-MM-DD or null)\n- time (HH:mm or null)\n\nRules:\n- Use Asia/Kolkata for all date/time interpretation.\n- Resolve relative dates using the current date.\n- Preserve the exact time requested.\n- Never reuse information from previous messages.\n- Return valid JSON only.\n- Do not include Markdown or explanations.\n\nOutput format:\nReturn valid JSON only.\n\nExpected structure:\n{\n  \"intent\": \"CREATE_REMINDER\",\n  \"description\": \"Reading session\",\n  \"date\": \"2026-11-10\",\n  \"time\": \"21:00\",\n\"response\": \"Saturn is the sixth planet from the Sun\"\n}\n\nDo not use Markdown code fences.\nDo not include explanations."
+            }
+          ]
+        },
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        384,
+        0
+      ],
+      "id": "5803395d-1c84-42e5-823d-a5ca8eb34771",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": "llama3.2:3b",
+        "options": {
+          "numPredict": 1024
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        320,
+        208
+      ],
+      "id": "7ad8cdb4-388c-490a-8d00-f754a8fa742d",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "CBi58n520qXFY6Of",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"intent\": {\n      \"type\": \"string\",\n      \"enum\": [\n        \"CREATE_TASK\",\n        \"CREATE_REMINDER\",\n        \"ASK_QUESTION\",\n        \"GENERAL_CHAT\"\n      ]\n    },\n    \"description\": {\n      \"type\": \"string\"\n    },\n    \"date\": {\n      \"type\": [\"string\", \"null\"]\n    },\n    \"time\": {\n      \"type\": [\"string\", \"null\"]\n    }\n  },\n  \"required\": [\n    \"intent\",\n    \"description\",\n    \"date\",\n    \"time\"\n  ],\n  \"additionalProperties\": false\n}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        528,
+        64
+      ],
+      "id": "bf6ff9c4-ba25-46d8-8d35-1722da3f4abf",
+      "name": "Structured Output Parser",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "1fa154e9-7d78-4858-b6b1-25fafabacd4f",
+              "leftValue": "={{ ($json.output.intent ?? '').trim() }}",
+              "rightValue": "CREATE_REMINDER o",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "26146ec9-2bff-4bd9-b99c-8e1f2d25c6d0",
+              "leftValue": "={{ ($json.output.intent ?? '').trim() }}",
+              "rightValue": "CREATE_TASK",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        944,
+        32
+      ],
+      "id": "94629fdc-87de-4d0f-bca2-5ce095d96980",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst raw = $input.first().json.text;\n\nif (!raw) {\n  throw new Error(\"LLM returned an empty response\");\n}\n\nconst cleaned = raw\n  .replace(/^```(?:json)?\\s*/i, \"\")\n  .replace(/\\s*```$/i, \"\")\n  .trim();\n\nlet parsed;\n\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (error) {\n  throw new Error(`Invalid JSON: ${error.message}`);\n}\n\nconst data = parsed.output ?? parsed;\n\nconst { intent, description, date, time, response } = data;\n\nconst allowedIntents = [\n  \"CREATE_TASK\",\n  \"CREATE_REMINDER\",\n  \"ASK_QUESTION\",\n  \"GENERAL_CHAT\"\n];\n\nif (!allowedIntents.includes(intent)) {\n  throw new Error(\"Invalid intent\");\n}\n\nif (!description?.trim() && !response?.trim()) {\n  throw new Error(\"Description is missing\");\n}\n\nlet reminderAt = null;\nlet endAt = null;\n\nif (date && time) {\n  const dateMatch = date.match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);\n  const timeMatch = time.match(/^([01]\\d|2[0-3]):([0-5]\\d)$/);\n\n  if (!dateMatch || !timeMatch) {\n    throw new Error(\"Invalid date or time format\");\n  }\n\n  const [, year, month, day] = dateMatch.map(Number);\n  const [, hours, minutes] = timeMatch.map(Number);\n\n  const localDate = new Date(\n    Date.UTC(year, month - 1, day, hours, minutes)\n  );\n\n  // Reject impossible calendar dates\n  if (\n    localDate.getUTCFullYear() !== year ||\n    localDate.getUTCMonth() !== month - 1 ||\n    localDate.getUTCDate() !== day\n  ) {\n    throw new Error(\"Invalid calendar date\");\n  }\n\n  // Convert Asia/Kolkata (UTC+05:30) to UTC\n  reminderAt = new Date(\n    localDate.getTime() - 330 * 60 * 1000\n  ).toISOString();\n\n  // Default reminder duration: 15 minutes\n  endAt = new Date(\n    Date.parse(reminderAt) + 15 * 60 * 1000\n  ).toISOString();\n}\n\nreturn [{\n  json: {\n    output: {\n      intent,\n      description: description || response,\n      date,\n      time,\n      response: response || description\n    },\n    reminderAt,\n    endAt,\n    timezone: \"Asia/Kolkata\",\n    status: \"VALIDATED\"\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        16
+      ],
+      "id": "28158c85-1b96-44ec-b356-f1ecdc65ec07",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "kashishverma8382@gmail.com",
+          "mode": "list",
+          "cachedResultName": "kashishverma8382@gmail.com"
+        },
+        "start": "=\t{{ $json.reminderAt }}",
+        "end": "=\t{{ $json.endAt }}",
+        "additionalFields": {
+          "description": "=Created by MyOS personal assistant",
+          "summary": "={{ $json.output.description }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1200,
+        -80
+      ],
+      "id": "d0602e94-14cd-4d07-8617-07010230658f",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "bOdq3JO5OKLesvMh",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "951ad8f1-8a09-439d-8a4c-0d46217d2589",
+              "name": "message",
+              "value": "={{ \"Your reminder has been scheduled successfully! 📅\\n\\nActivity: \" + $json.summary + \"\\nStart: \" + DateTime.fromISO($json.start.dateTime).setZone('Asia/Kolkata').toFormat('dd LLL yyyy, hh:mm a') }}",
+              "type": "string"
+            },
+            {
+              "id": "ac9e09e9-fa29-4863-9b9f-4ec98c5726b9",
+              "name": "status",
+              "value": "SUCCESS",
+              "type": "string"
+            },
+            {
+              "id": "50077b34-dc91-46e5-b9c8-78b86943bfbe",
+              "name": "eventId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1424,
+        -64
+      ],
+      "id": "5fd53138-3881-4975-ae9b-785213941ee5",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.5,
+      "position": [
+        128,
+        -128
+      ],
+      "id": "bdde6ff2-698c-457c-96d5-dac1179b1580",
+      "name": "Telegram Trigger",
+      "webhookId": "7a1cfc02-4cdb-46cb-a2a4-81a0b90f0513",
+      "credentials": {
+        "telegramApi": {
+          "id": "T3tbpIlkwibIDE3m",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').first().json.message.chat.id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1648,
+        48
+      ],
+      "id": "d5ac21e4-1836-4990-b707-8e6496944722",
+      "name": "Send a text message",
+      "webhookId": "c014aa5f-b1be-4ec7-abf0-9f6370b2ce38",
+      "credentials": {
+        "telegramApi": {
+          "id": "T3tbpIlkwibIDE3m",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7343636c-fd47-4c1b-b724-1b07a49db78b",
+              "name": "message",
+              "value": "={{ $json.output.response }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1168,
+        128
+      ],
+      "id": "3aa96e3c-00ff-446a-9f8f-af6ebe40c6b2",
+      "name": "Edit Fields1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d1d61eb1-7169-4064-bebd-4ea5e33e3c81",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "bef260ee7c423694b1a77e170075c657dfb3ae4a1a8a696d8116057926a59c1a"
+  },
+  "nodeGroups": [],
+  "id": "UNjpeDguYAT1jgNp",
+  "tags": []
+}
